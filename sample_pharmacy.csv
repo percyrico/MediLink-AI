@@ -1,0 +1,4 @@
+pharmacy_id,name,phone,address,city,lat,lng,last_updated
+p1,Legon Meds,+233000,Academic Rd,Accra,5.651,-0.186,2025-09-30T12:00:00Z
+p2,Osu Care,+233001,Cantonments Rd,Accra,5.58,-0.17,2025-09-30T12:00:00Z
+p3,Tema Health,+233002,Harbour Rd,Tema,5.68,-0.01,2025-09-30T12:00:00Z

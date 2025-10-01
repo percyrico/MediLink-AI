@@ -1,0 +1,6 @@
+snapshot_id,pharmacy_id,product_id,qty_available,min_qty,max_qty,status,observed_at
+s1,p1,d1,4,5,100,LOW,2025-09-30T12:00:00Z
+s2,p2,d1,20,5,100,IN_STOCK,2025-09-30T12:00:00Z
+s3,p1,d2,0,5,100,OUT,2025-09-30T12:00:00Z
+s4,p3,d3,12,5,100,IN_STOCK,2025-09-30T12:00:00Z
+s5,p2,d2,6,5,100,IN_STOCK,2025-09-30T12:00:00Z

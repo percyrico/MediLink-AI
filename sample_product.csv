@@ -1,0 +1,4 @@
+product_id,name,strength,form,atc_code,manufacturer
+d1,Amoxicillin,500mg,capsule,J01CA04,GenericCo
+d2,Paracetamol,500mg,tablet,N02BE01,GenericCo
+d3,Ibuprofen,400mg,tablet,M01AE01,GenericCo

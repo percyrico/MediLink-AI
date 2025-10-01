@@ -1,0 +1,6 @@
+price_id,pharmacy_id,product_id,currency,unit_price,observed_at
+pr1,p1,d1,GHS,28.0,2025-09-30T12:00:00Z
+pr2,p2,d1,GHS,25.0,2025-09-30T12:00:00Z
+pr3,p1,d2,GHS,3.0,2025-09-30T12:00:00Z
+pr4,p3,d3,GHS,12.0,2025-09-30T12:00:00Z
+pr5,p2,d2,GHS,3.5,2025-09-30T12:00:00Z
