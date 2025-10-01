@@ -83,7 +83,9 @@ def query_join(
     name_q, strength_q = _split_name_strength(product_query)
     city = (city or "").strip() or None
     if not name_q and not strength_q:
-        return pd.DataFrame(columns=["Product","Strength","Pharmacy","City","Qty","Status","Price","Currency","Distance (km)","Maps"])
+        return pd.DataFrame(columns=[
+            "Product","Strength","Pharmacy","City","Qty","Status","Price","Currency","Distance (km)","Maps","lat","lng"
+        ])
 
     if USE_BQ:
         _try_init_bigquery()
@@ -181,7 +183,9 @@ LIMIT @lim
         df = df[df["distance_km"].notna() & (df["distance_km"] <= max_km)].sort_values("distance_km")
 
     if df is None or df.empty:
-        return pd.DataFrame(columns=["Product","Strength","Pharmacy","City","Qty","Status","Price","Currency","Distance (km)","Maps"])
+        return pd.DataFrame(columns=[
+            "Product","Strength","Pharmacy","City","Qty","Status","Price","Currency","Distance (km)","Maps","lat","lng"
+        ])
 
     def gmaps_link(row):
         if pd.isna(row.get("lat")) or pd.isna(row.get("lng")):
@@ -197,7 +201,9 @@ LIMIT @lim
         "Status": df.get("status"),
         "Price": df.get("unit_price"),
         "Currency": df.get("currency"),
-        "Distance (km)": df.get("distance_km", pd.Series([None]*len(df)))
+        "Distance (km)": df.get("distance_km", pd.Series([None]*len(df))),
+        "lat": df.get("lat"),
+        "lng": df.get("lng"),
     })
     out["Maps"] = df.apply(gmaps_link, axis=1)
     for col, asc in [("Qty", False), ("Price", True)]:
@@ -365,9 +371,9 @@ LIMIT @lim
             df = df[df["city"].str.lower() == city.lower()]
         df = df[["prod_name","strength","pharm_name","city","Latest Qty","14d Avg","Risk","Price","Currency","lat","lng"]]
     if df.empty:
-        return pd.DataFrame(columns=["Product","Strength","Pharmacy","City","Latest Qty","14d Avg","Risk","Price","Currency","Maps"])
+        return pd.DataFrame(columns=["Product","Strength","Pharmacy","City","Latest Qty","14d Avg","Risk","Price","Currency","Maps","lat","lng"])
     df["Maps"] = df.apply(lambda r: "" if pd.isna(r.get("lat")) or pd.isna(r.get("lng")) else f"https://www.google.com/maps/search/?api=1&query={r['lat']},{r['lng']}", axis=1)
-    return df.drop(columns=["lat","lng"], errors="ignore")
+    return df  # keep lat/lng so the map can render
 
 BADGE_BQ = '<span class="pill pill-bq">BigQuery</span>'
 BADGE_LOCAL = '<span class="pill">Local CSV</span>'
@@ -391,7 +397,19 @@ CSS = """
 .card {background:#ffffff; border:1px solid #eee; border-radius:14px; padding:14px;}
 .pill-chip{display:inline-block;margin:4px 6px 0 0;padding:6px 10px;border-radius:999px;border:1px solid #e0e0e0;background:#fafafa;font-weight:600;}
 .pill-chip .x{margin-left:8px;cursor:pointer;}
+.mapbox {border:1px solid #eee;border-radius:12px;overflow:hidden;}
 """
+
+def _render_map_html(lat: Optional[float], lng: Optional[float], title: str) -> str:
+    if lat is None or lng is None or pd.isna(lat) or pd.isna(lng):
+        return "<div class='small'>No coordinates for this row.</div>"
+    try:
+        import folium
+        m = folium.Map(location=[lat, lng], zoom_start=15)
+        folium.Marker([lat, lng], tooltip=title, popup=title).add_to(m)
+        return m._repr_html_()
+    except Exception as e:
+        return f"<div class='small'>Map render error: {e}</div>"
 
 def build_ui():
     with gr.Blocks(css=CSS, title="MediLink AI — Drug Shortage Tracker", theme=gr.themes.Soft()) as demo:
@@ -409,6 +427,7 @@ def build_ui():
         """)
 
         # --- Search Tab ---
+        find_results_state = gr.State(value=pd.DataFrame())
         with gr.Tab("Find"):
             with gr.Row():
                 with gr.Column(scale=3):
@@ -437,27 +456,58 @@ def build_ui():
                 with gr.Column():
                     gr.Markdown("### Explain")
                     out_explain = gr.Markdown(value="")
+            with gr.Row():
+                gr.Markdown("### Map")
+            with gr.Row():
+                map_html_find = gr.HTML(elem_classes=["mapbox"])
 
             def run(product, city, price_cap, lat, lng, max_km):
                 t0 = time.time()
-                df = query_join(product, city if (city or "").strip() else None,
-                                max_km if max_km else None,
-                                lat if lat else None,
-                                lng if lng else None,
-                                price_cap)
+                df_full = query_join(product, city if (city or "").strip() else None,
+                                     max_km if max_km else None,
+                                     lat if lat else None,
+                                     lng if lng else None,
+                                     price_cap)
                 elapsed = time.time() - t0
                 summary = explain(product, city)
-                if not df.empty and "Maps" in df.columns:
-                    df["Maps"] = df["Maps"].apply(lambda u: f"[Open](%s)" % u if isinstance(u, str) and u else "")
-                info = f"**Results:** {len(df)}  |  **Latency:** {elapsed:.2f}s"
-                return info, df, summary
+                df_display = df_full.copy()
+                if not df_display.empty and "Maps" in df_display.columns:
+                    df_display["Maps"] = df_display["Maps"].apply(lambda u: f"[Open](%s)" % u if isinstance(u, str) and u else "")
+                for c in ("lat","lng"):
+                    if c in df_display.columns:
+                        df_display = df_display.drop(columns=[c])
+                info = f"**Results:** {len(df_display)}  |  **Latency:** {elapsed:.2f}s"
+                return info, df_display, summary, df_full, ""
 
-            btn.click(run, [product, city, price_cap, lat, lng, max_km], [out_info, out_tbl, out_explain])
-            clear.click(lambda: ("amoxicillin 500mg","Accra",None,None,None,10,"",pd.DataFrame(),""), outputs=[product, city, price_cap, lat, lng, max_km, out_info, out_tbl, out_explain])
+            btn.click(
+                run,
+                [product, city, price_cap, lat, lng, max_km],
+                [out_info, out_tbl, out_explain, find_results_state, map_html_find]
+            )
+
+            def on_find_select(df_full: pd.DataFrame, evt: gr.SelectData):
+                if df_full is None or df_full.empty:
+                    return "<div class='small'>No data.</div>"
+                idx = evt.index if isinstance(evt.index, int) else (evt.index[0] if evt.index else None)
+                if idx is None or idx >= len(df_full):
+                    return "<div class='small'>Invalid selection.</div>"
+                row = df_full.iloc[idx]
+                lt = row.get("lat", None)
+                lg = row.get("lng", None)
+                title = f"{row.get('Pharmacy', 'Pharmacy')} — {row.get('Product', 'Product')}"
+                return _render_map_html(lt, lg, title)
+
+            out_tbl.select(on_find_select, [find_results_state], [map_html_find])
+
+            clear.click(
+                lambda: ("amoxicillin 500mg","Accra",None,None,None,10,"",pd.DataFrame(),"", pd.DataFrame(), ""),
+                outputs=[product, city, price_cap, lat, lng, max_km, out_info, out_tbl, out_explain, find_results_state, map_html_find]
+            )
 
         # --- Shortage Watchlist Tab ---
         with gr.Tab("Shortage Watchlist"):
             watchlist_state = gr.State(value=["amoxicillin 500mg"])
+            wl_results_state = gr.State(value=pd.DataFrame())
             with gr.Row():
                 with gr.Column(scale=3):
                     wl_input = gr.Textbox(label="Add medicine to watchlist", placeholder="e.g., amoxicillin 500mg or ibuprofen 200mg")
@@ -474,6 +524,10 @@ def build_ui():
                 wrap=True,
                 interactive=False
             )
+            with gr.Row():
+                gr.Markdown("### Map")
+            with gr.Row():
+                map_html_wl = gr.HTML(elem_classes=["mapbox"])
 
             def render_chips(items: List[str]) -> str:
                 if not items: return "<div class='small'>No items in watchlist yet.</div>"
@@ -495,19 +549,38 @@ def build_ui():
                 return [], render_chips([])
 
             def wl_refresh_tbl(curr: List[str], city_txt: str):
-                df = shortage_watchlist_df(curr or [], (city_txt or "").strip() or None, limit=400)
-                if not df.empty and "Maps" in df.columns:
-                    df["Maps"] = df["Maps"].apply(lambda u: f"[Open](%s)" % u if isinstance(u, str) and u else "")
-                return df
+                df_full = shortage_watchlist_df(curr or [], (city_txt or "").strip() or None, limit=400)
+                df_display = df_full.copy()
+                if not df_display.empty and "Maps" in df_display.columns:
+                    df_display["Maps"] = df_display["Maps"].apply(lambda u: f"[Open](%s)" % u if isinstance(u, str) and u else "")
+                for c in ("lat","lng"):
+                    if c in df_display.columns:
+                        df_display = df_display.drop(columns=[c])
+                return df_display, df_full, ""
 
             wl_add.click(wl_add_item, [watchlist_state, wl_input], [watchlist_state, wl_chips])
             wl_clear.click(wl_clear_all, [watchlist_state], [watchlist_state, wl_chips])
-            wl_refresh.click(wl_refresh_tbl, [watchlist_state, wl_city], [wl_table])
+            wl_refresh.click(wl_refresh_tbl, [watchlist_state, wl_city], [wl_table, wl_results_state, map_html_wl])
 
             def _init_watchlist(state_items: List[str], city_txt: str):
-                return render_chips(state_items or []), wl_refresh_tbl(state_items or [], city_txt)
+                df_display, df_full, _ = wl_refresh_tbl(state_items or [], city_txt)
+                return render_chips(state_items or []), df_display, df_full, ""
 
-            demo.load(_init_watchlist, [watchlist_state, wl_city], [wl_chips, wl_table])
+            demo.load(_init_watchlist, [watchlist_state, wl_city], [wl_chips, wl_table, wl_results_state, map_html_wl])
+
+            def on_wl_select(df_full: pd.DataFrame, evt: gr.SelectData):
+                if df_full is None or df_full.empty:
+                    return "<div class='small'>No data.</div>"
+                idx = evt.index if isinstance(evt.index, int) else (evt.index[0] if evt.index else None)
+                if idx is None or idx >= len(df_full):
+                    return "<div class='small'>Invalid selection.</div>"
+                row = df_full.iloc[idx]
+                lt = row.get("lat", None)
+                lg = row.get("lng", None)
+                title = f"{row.get('Pharmacy','Pharmacy')} — {row.get('Product','Product')}"
+                return _render_map_html(lt, lg, title)
+
+            wl_table.select(on_wl_select, [wl_results_state], [map_html_wl])
 
         gr.Markdown('<div class="small">Built for the Fivetran × Google Cloud challenge — custom connector → BigQuery → Vertex AI → Gradio.</div>')
     return demo
