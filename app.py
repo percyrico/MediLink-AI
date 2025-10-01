@@ -433,14 +433,14 @@ def build_ui():
                 with gr.Column(scale=3):
                     product = gr.Textbox(label="Medicine", value="amoxicillin 500mg", placeholder="e.g., amoxicillin 500mg or paracetamol 1 g")
                 with gr.Column(scale=2):
-                    city = gr.Textbox(label="City (optional)", value="Accra", placeholder="e.g., Accra")
+                    city = gr.Textbox(label="City (optional)", placeholder="e.g., Accra")
                 with gr.Column(scale=1):
                     price_cap = gr.Number(label="Max price (optional)", value=None)
             with gr.Accordion("Location filter (optional)", open=False):
                 with gr.Row():
                     lat = gr.Number(label="Your latitude")
                     lng = gr.Number(label="Your longitude")
-                    max_km = gr.Number(label="Max distance (km)", value=10)
+                    max_km = gr.Number(label="Max distance (km)")
             with gr.Row():
                 btn = gr.Button("🔎 Search", variant="primary", scale=1)
                 clear = gr.Button("Reset", scale=1)
